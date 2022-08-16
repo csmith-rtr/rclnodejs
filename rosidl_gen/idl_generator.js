@@ -35,8 +35,55 @@ async function writeGeneratedCode(dir, fileName, code) {
   await fse.writeFile(path.join(dir, fileName), code);
 }
 
-function generateServiceJSStruct(serviceInfo, dir) {
-  dir = path.join(dir, `${serviceInfo.pkgName}`);
+async function generateServiceJSStruct(serviceInfo, dir) {
+  let requestMsg, responseMsg;
+  // if this is called while generating an action message filePath is not provided
+  if (serviceInfo.filePath) {
+    // check if the <service>_Request/Response messages were generated (usually done by colcon)
+    // if not, then we'll need to generate them ourselves
+    const sourcedir = path.dirname(serviceInfo.filePath);
+    if (
+      !fse.existsSync(
+        path.join(sourcedir, `${serviceInfo.interfaceName}_Request.msg`)
+      ) ||
+      !fse.existsSync(
+        path.join(sourcedir, `${serviceInfo.interfaceName}_Response.msg`)
+      )
+    ) {
+      let spec;
+      try {
+        spec = await parser.parseServiceFile(
+          serviceInfo.pkgName,
+          serviceInfo.filePath
+        );
+      } catch (err) {
+        console.warn(
+          'Unable to generate service files for %s',
+          serviceInfo.interfaceName
+        );
+      }
+      requestMsg = generateMessageJSStructFromSpec(
+        {
+          pkgName: spec.pkgName,
+          subFolder: serviceInfo.subFolder,
+          interfaceName: spec.request.msgName,
+        },
+        dir,
+        spec.request
+      );
+
+      responseMsg = generateMessageJSStructFromSpec(
+        {
+          pkgName: spec.pkgName,
+          subFolder: serviceInfo.subFolder,
+          interfaceName: spec.response.msgName,
+        },
+        dir,
+        spec.response
+      );
+    }
+  }
+
   const fileName =
     serviceInfo.pkgName +
     '__' +
@@ -47,7 +94,12 @@ function generateServiceJSStruct(serviceInfo, dir) {
   const generatedCode = removeEmptyLines(
     dots.service({ serviceInfo: serviceInfo })
   );
-  return writeGeneratedCode(dir, fileName, generatedCode);
+  const pkg_dir = path.join(dir, `${serviceInfo.pkgName}`);
+  return Promise.all([
+    requestMsg,
+    responseMsg,
+    writeGeneratedCode(pkg_dir, fileName, generatedCode),
+  ]);
 }
 
 async function generateMessageJSStruct(messageInfo, dir) {
